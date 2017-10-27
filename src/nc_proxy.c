@@ -161,7 +161,33 @@ proxy_listen(struct context *ctx, struct conn *p)
                   pool->addrstr.len, pool->addrstr.data, strerror(errno));
         return NC_ERROR;
     }
+/*
+    status = event_add_conn(ctx->evb, p);
+    if (status < 0) {
+        log_error("event add conn p %d on addr '%.*s' failed: %s",
+                  p->sd, pool->addrstr.len, pool->addrstr.data,
+                  strerror(errno));
+        return NC_ERROR;
+    }
 
+    status = event_del_out(ctx->evb, p);
+    if (status < 0) {
+        log_error("event del out p %d on addr '%.*s' failed: %s",
+                  p->sd, pool->addrstr.len, pool->addrstr.data,
+                  strerror(errno));
+        return NC_ERROR;
+    }
+*/
+    return NC_OK;
+}
+
+rstatus_t add_proxy_conn(void *elem, void *data){
+    rstatus_t status;
+    struct server_pool *pool = elem;
+    struct conn *p;
+    p = pool->p_conn;
+
+    struct context *ctx = pool->ctx;
     status = event_add_conn(ctx->evb, p);
     if (status < 0) {
         log_error("event add conn p %d on addr '%.*s' failed: %s",
@@ -178,7 +204,6 @@ proxy_listen(struct context *ctx, struct conn *p)
         return NC_ERROR;
     }
 
-    return NC_OK;
 }
 
 rstatus_t
@@ -240,7 +265,17 @@ proxy_each_deinit(void *elem, void *data)
 
     return NC_OK;
 }
+rstatus_t
+proxy_each_remove(void *elem, void *data)
+{
+    struct server_pool *pool = elem;
+    struct conn *p;
 
+    p = pool->p_conn;
+    event_del_conn(pool->ctx->evb,p);
+
+    return NC_OK;
+}
 void
 proxy_deinit(struct context *ctx)
 {

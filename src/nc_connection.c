@@ -21,6 +21,7 @@
 #include <nc_server.h>
 #include <nc_client.h>
 #include <nc_proxy.h>
+#include <nc_notify.h>
 #include <proto/nc_proto.h>
 
 /*
@@ -235,6 +236,18 @@ conn_get(void *owner, bool client, bool redis)
     return conn;
 }
 
+struct conn *conn_get_notify(void *owner){
+    struct conn *conn;
+
+    conn = _conn_get();
+    if (conn == NULL) {
+        return NULL;
+    }
+    conn->recv = notify_recv;
+    conn->proxy = 1;
+    conn->owner = owner;
+    return conn;
+}
 struct conn *
 conn_get_proxy(void *owner)
 {

@@ -97,6 +97,7 @@ ssize_t conn_sendv(struct conn *conn, struct array *sendv, size_t nsend);
 void conn_init(void);
 void conn_deinit(void);
 uint32_t conn_ncurr_conn(void);
+struct conn *conn_get_notify(void *owner);
 uint64_t conn_ntotal_conn(void);
 uint32_t conn_ncurr_cconn(void);
 
