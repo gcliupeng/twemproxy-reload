@@ -92,7 +92,7 @@ struct conn {
 };
 
 TAILQ_HEAD(conn_tqh, conn);
-
+struct conn *conn_get_notify(void *owner);
 struct context *conn_to_ctx(struct conn *conn);
 struct conn *conn_get(void *owner, bool client, bool redis);
 struct conn *conn_get_proxy(void *owner);

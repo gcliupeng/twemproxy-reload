@@ -306,9 +306,9 @@ static rstatus_t
 nc_get_options(int argc, char **argv, struct instance *nci)
 {
     int c, value;
-
+    size_t n;    
     opterr = 0;
-
+    char *t ;
     for (;;) {
         c = getopt_long(argc, argv, short_options, long_options, NULL);
         if (c == -1) {
@@ -349,11 +349,17 @@ nc_get_options(int argc, char **argv, struct instance *nci)
             break;
 
         case 'o':
-            nci->log_filename = optarg;
+            n = strlen(optarg);
+            t = malloc(n+1);
+            strncpy(t,optarg,n);
+            nci->log_filename = t;
             break;
 
         case 'c':
-            nci->conf_filename = optarg;
+            n = strlen(optarg);
+            t = malloc(n+1);
+            strncpy(t,optarg,n);
+            nci->conf_filename = t;
             break;
 
         case 's':
@@ -382,11 +388,17 @@ nc_get_options(int argc, char **argv, struct instance *nci)
             break;
 
         case 'a':
-            nci->stats_addr = optarg;
+            n = strlen(optarg);
+            t = malloc(n+1);
+            strncpy(t,optarg,n);
+            nci->stats_addr = t;
             break;
 
         case 'p':
-            nci->pid_filename = optarg;
+            n = strlen(optarg);
+            t = malloc(n+1);
+            strncpy(t,optarg,n);
+            nci->pid_filename = t;
             break;
 
         case 'm':
@@ -535,10 +547,13 @@ nc_run(struct instance *nci)
 
     core_stop(ctx);
 }
-
+int ac;
+char **av;
 int
 main(int argc, char **argv)
 {
+    ac = argc;
+    av = argv;
     rstatus_t status;
     struct instance nci;
 
