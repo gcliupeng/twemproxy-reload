@@ -17,34 +17,15 @@
 
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
 #include <nc_core.h>
 #include <nc_conf.h>
 #include <nc_server.h>
 #include <nc_proxy.h>
-#include <nc_notify.h>
 
 static uint32_t ctx_id; /* context generation */
-int reload_receive = 0;
-extern int ac;
-extern char **  av;
-char pad[100]="                                         ";
-static void reload(int signo){
-    if(signo == SIGUSR1){
-        reload_receive = 1;
-        log_error("signal user1 receive\n");
-    }else if (signo == SIGCHLD){
-        reload_receive = 0;
-        int status;
-        waitpid(-1, &status, WNOHANG);
-        if(WTERMSIG(status)){
-            log_error("signal receive %d\n",WTERMSIG(status));
-        }else{
-            log_error("code receive %d\n",WEXITSTATUS(status) );
-        }
-    }
-}
-static rstatus_t core_calc_connections(struct context *ctx)
+
+static rstatus_t
+core_calc_connections(struct context *ctx)
 {
     int status;
     struct rlimit limit;
@@ -61,63 +42,6 @@ static rstatus_t core_calc_connections(struct context *ctx)
               "max server conns %"PRIu32"", ctx->max_nfd, ctx->max_ncconn,
               ctx->max_nsconn);
 
-    return NC_OK;
-}
-
-
-
-static rstatus_t master_worker_init(struct instance *nci){
-    while(true){
-        if(pipe(nci->p)==-1){
-            return NC_ERROR;
-        }
-
-        int child_pid = fork();
-        if(child_pid < 0){
-            return NC_ERROR;
-        }else if(child_pid > 0){
-            //set title
-            size_t max = 0;
-            int i;
-            for (i = 0; i <ac ; ++i){
-                max+= strlen(av[i])+1;
-            }
-            i=nc_snprintf((char*)av[0],max,"twemproxy master");
-            nc_snprintf((char*)av[0]+i,max-i,pad);
-            memset((char*)av[0]+i,0,max-i);
-            struct sigaction act;  
-            act.sa_handler = reload;  
-            sigemptyset(&act.sa_mask);  
-            sigaction(SIGUSR1, &act, 0);
-            sigaction(SIGCHLD, &act, 0);
-            sigset_t set;
-            sigemptyset(&set);
-            while(true){
-                sigsuspend(&set);
-                if(reload_receive){
-                    reload_receive = 0;
-                    break;
-                }
-            }
-            //send close to child
-            int n = write(nci->p[1],"reload",6);
-            if(n ==6){
-                log_stderr("reload twemproxy");
-            }
-        }else{
-            //child
-            size_t max = 0;
-            int i;
-            for (i = 0; i <ac ; ++i){
-                max+= strlen(av[i])+1;
-            }
-            i=nc_snprintf((char*)av[0],max,"twemproxy worker");
-            nc_snprintf((char*)av[0]+i,max-i,pad);
-            memset((char*)av[0]+i,0,max-i);
-            log_stderr("new twemproxy started");
-            break;
-        }
-    }
     return NC_OK;
 }
 
@@ -179,21 +103,6 @@ core_ctx_create(struct instance *nci)
         return NULL;
     }
 
-
-    /* initialize proxy per server pool */
-    status = proxy_init(ctx);
-    if (status != NC_OK) {
-        server_pool_disconnect(ctx);
-        event_base_destroy(ctx->evb);
-        stats_destroy(ctx->stats);
-        server_pool_deinit(&ctx->pool);
-        conf_destroy(ctx->cf);
-        nc_free(ctx);
-        return NULL;
-    }
-
-    master_worker_init(nci);
-
     /* initialize event handling for client, proxy and server */
     ctx->evb = event_base_create(EVENT_SIZE, &core_core);
     if (ctx->evb == NULL) {
@@ -203,8 +112,6 @@ core_ctx_create(struct instance *nci)
         nc_free(ctx);
         return NULL;
     }
-
-    
 
     /* preconnect? servers in server pool */
     status = server_pool_preconnect(ctx);
@@ -218,10 +125,8 @@ core_ctx_create(struct instance *nci)
         return NULL;
     }
 
-    array_each(&ctx->pool, add_proxy_conn, NULL);
-
-    /* initialize notice pipe */
-    status = notify_init(ctx,nci->p[0]);
+    /* initialize proxy per server pool */
+    status = proxy_init(ctx);
     if (status != NC_OK) {
         server_pool_disconnect(ctx);
         event_base_destroy(ctx->evb);
@@ -364,13 +269,6 @@ core_timeout(struct context *ctx)
         struct conn *conn;
         int64_t now, then;
 
-        int64_t nowt = (int64_t)time(NULL);
-        if(ctx->close && nowt - ctx->close_time >10){
-            //array_each(&ctx->pool, proxy_each_deinit, NULL);
-            exit(2);
-        }
-
-
         msg = msg_tmo_min();
         if (msg == NULL) {
             ctx->timeout = ctx->max_timeout;
@@ -413,7 +311,14 @@ core_core(void *arg, uint32_t events)
 {
     rstatus_t status;
     struct conn *conn = arg;
-    struct context *ctx = conn_to_ctx(conn);
+    struct context *ctx;
+
+    if (conn->owner == NULL) {
+        log_warn("conn is already unrefed!");
+        return NC_OK;
+    }
+
+    ctx = conn_to_ctx(conn);
 
     log_debug(LOG_VVERB, "event %04"PRIX32" on %c %d", events,
               conn->client ? 'c' : (conn->proxy ? 'p' : 's'), conn->sd);

@@ -303,13 +303,37 @@ req_server_enqueue_imsgq(struct context *ctx, struct conn *conn, struct msg *msg
      * or the message is dequeued from the server out_q
      *
      * noreply request are free from timeouts because client is not intrested
-     * in the reponse anyway!
+     * in the response anyway!
      */
     if (!msg->noreply) {
         msg_tmo_insert(msg, conn);
     }
 
     TAILQ_INSERT_TAIL(&conn->imsg_q, msg, s_tqe);
+
+    stats_server_incr(ctx, conn->owner, in_queue);
+    stats_server_incr_by(ctx, conn->owner, in_queue_bytes, msg->mlen);
+}
+
+void
+req_server_enqueue_imsgq_head(struct context *ctx, struct conn *conn, struct msg *msg)
+{
+    ASSERT(msg->request);
+    ASSERT(!conn->client && !conn->proxy);
+
+    /*
+     * timeout clock starts ticking the instant the message is enqueued into
+     * the server in_q; the clock continues to tick until it either expires
+     * or the message is dequeued from the server out_q
+     *
+     * noreply request are free from timeouts because client is not intrested
+     * in the reponse anyway!
+     */
+    if (!msg->noreply) {
+        msg_tmo_insert(msg, conn);
+    }
+
+    TAILQ_INSERT_HEAD(&conn->imsg_q, msg, s_tqe);
 
     stats_server_incr(ctx, conn->owner, in_queue);
     stats_server_incr_by(ctx, conn->owner, in_queue_bytes, msg->mlen);
@@ -429,20 +453,21 @@ req_recv_next(struct context *ctx, struct conn *conn, bool alloc)
 static rstatus_t
 req_make_reply(struct context *ctx, struct conn *conn, struct msg *req)
 {
-    struct msg *msg;
+    struct msg *rsp;
 
-    msg = msg_get(conn, true, conn->redis); /* replay */
-    if (msg == NULL) {
+    rsp = msg_get(conn, false, conn->redis); /* replay */
+    if (rsp == NULL) {
         conn->err = errno;
         return NC_ENOMEM;
     }
 
-    req->peer = msg;
-    msg->peer = req;
-    msg->request = 0;
+    req->peer = rsp;
+    rsp->peer = req;
+    rsp->request = 0;
 
     req->done = 1;
     conn->enqueue_outq(ctx, conn, req);
+
     return NC_OK;
 }
 
@@ -460,17 +485,30 @@ req_filter(struct context *ctx, struct conn *conn, struct msg *msg)
     }
 
     /*
-     * Handle "quit\r\n", which is the protocol way of doing a
-     * passive close
+     * Handle "quit\r\n" (memcache) or "*1\r\n$4\r\nquit\r\n" (redis), which
+     * is the protocol way of doing a passive close. The connection is closed
+     * as soon as all pending replies have been written to the client.
      */
     if (msg->quit) {
-        ASSERT(conn->rmsg == NULL);
         log_debug(LOG_INFO, "filter quit req %"PRIu64" from c %d", msg->id,
                   conn->sd);
+        if (conn->rmsg != NULL) {
+            log_debug(LOG_INFO, "discard invalid req %"PRIu64" len %"PRIu32" "
+                      "from c %d sent after quit req", conn->rmsg->id,
+                      conn->rmsg->mlen, conn->sd);
+        }
         conn->eof = 1;
         conn->recv_ready = 0;
         req_put(msg);
         return true;
+    }
+
+    /*
+     * If this conn is not authenticated, we will mark it as noforward,
+     * and handle it in the redis_reply handler.
+     */
+    if (!conn_authenticated(conn)) {
+        msg->noforward = 1;
     }
 
     return false;
@@ -554,6 +592,16 @@ req_forward(struct context *ctx, struct conn *c_conn, struct msg *msg)
             return;
         }
     }
+
+    if (!conn_authenticated(s_conn)) {
+        status = msg->add_auth(ctx, c_conn, s_conn);
+        if (status != NC_OK) {
+            req_forward_error(ctx, c_conn, msg);
+            s_conn->err = errno;
+            return;
+        }
+    }
+
     s_conn->enqueue_inq(ctx, s_conn, msg);
 
     req_forward_stats(ctx, s_conn->owner, msg);

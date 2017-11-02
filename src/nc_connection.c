@@ -21,7 +21,6 @@
 #include <nc_server.h>
 #include <nc_client.h>
 #include <nc_proxy.h>
-#include <nc_notify.h>
 #include <proto/nc_proto.h>
 
 /*
@@ -157,6 +156,7 @@ _conn_get(void)
     conn->eof = 0;
     conn->done = 0;
     conn->redis = 0;
+    conn->authenticated = 0;
 
     ntotal_conn++;
     ncurr_conn++;
@@ -202,7 +202,9 @@ conn_get(void *owner, bool client, bool redis)
         conn->dequeue_inq = NULL;
         conn->enqueue_outq = req_client_enqueue_omsgq;
         conn->dequeue_outq = req_client_dequeue_omsgq;
-        
+        conn->post_connect = NULL;
+        conn->swallow_msg = NULL;
+
         ncurr_cconn++;
     } else {
         /*
@@ -227,27 +229,21 @@ conn_get(void *owner, bool client, bool redis)
         conn->dequeue_inq = req_server_dequeue_imsgq;
         conn->enqueue_outq = req_server_enqueue_omsgq;
         conn->dequeue_outq = req_server_dequeue_omsgq;
+        if (redis) {
+          conn->post_connect = redis_post_connect;
+          conn->swallow_msg = redis_swallow_msg;
+        } else {
+          conn->post_connect = memcache_post_connect;
+          conn->swallow_msg = memcache_swallow_msg;
+        }
     }
 
     conn->ref(conn, owner);
-
     log_debug(LOG_VVERB, "get conn %p client %d", conn, conn->client);
 
     return conn;
 }
 
-struct conn *conn_get_notify(void *owner){
-    struct conn *conn;
-
-    conn = _conn_get();
-    if (conn == NULL) {
-        return NULL;
-    }
-    conn->recv = notify_recv;
-    conn->proxy = 1;
-    conn->owner = owner;
-    return conn;
-}
 struct conn *
 conn_get_proxy(void *owner)
 {
@@ -450,4 +446,28 @@ uint32_t
 conn_ncurr_cconn(void)
 {
     return ncurr_cconn;
+}
+
+/*
+ * Returns true if the connection is authenticated or doesn't require
+ * authentication, otherwise return false
+ */
+bool
+conn_authenticated(struct conn *conn)
+{
+    struct server_pool *pool;
+
+    ASSERT(!conn->proxy);
+
+    pool = conn->client ? conn->owner : ((struct server *)conn->owner)->owner;
+
+    if (!pool->require_auth) {
+        return true;
+    }
+
+    if (!conn->authenticated) {
+        return false;
+    }
+
+    return true;
 }

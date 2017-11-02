@@ -22,6 +22,23 @@
 #include <nc_server.h>
 #include <nc_conf.h>
 
+static void
+server_resolve(struct server *server, struct conn *conn)
+{
+    rstatus_t status;
+
+    status = nc_resolve(&server->addrstr, server->port, &server->info);
+    if (status != NC_OK) {
+        conn->err = EHOSTDOWN;
+        conn->done = 1;
+        return;
+    }
+
+    conn->family = server->info.family;
+    conn->addrlen = server->info.addrlen;
+    conn->addr = (struct sockaddr *)&server->info.addr;
+}
+
 void
 server_ref(struct conn *conn, void *owner)
 {
@@ -30,9 +47,7 @@ server_ref(struct conn *conn, void *owner)
     ASSERT(!conn->client && !conn->proxy);
     ASSERT(conn->owner == NULL);
 
-    conn->family = server->family;
-    conn->addrlen = server->addrlen;
-    conn->addr = server->addr;
+    server_resolve(server, conn);
 
     server->ns_conn_q++;
     TAILQ_INSERT_TAIL(&server->s_conn_q, conn, conn_tqe);
@@ -338,6 +353,8 @@ server_close(struct context *ctx, struct conn *conn)
     server_close_stats(ctx, conn->owner, conn->err, conn->eof,
                        conn->connected);
 
+    conn->connected = false;
+
     if (conn->sd < 0) {
         server_failure(ctx, conn->owner);
         conn->unref(conn);
@@ -452,6 +469,12 @@ server_connect(struct context *ctx, struct server *server, struct conn *conn)
 
     ASSERT(!conn->client && !conn->proxy);
 
+    if (conn->err) {
+      ASSERT(conn->done && conn->sd < 0);
+      errno = conn->err;
+      return NC_ERROR;
+    }
+
     if (conn->sd > 0) {
         /* already connected on server connection */
         return NC_OK;
@@ -535,6 +558,8 @@ server_connected(struct context *ctx, struct conn *conn)
     conn->connecting = 0;
     conn->connected = 1;
 
+    conn->post_connect(ctx, conn, server);
+
     log_debug(LOG_INFO, "connected on s %d to server '%.*s'", conn->sd,
               server->pname.len, server->pname.data);
 }
@@ -605,12 +630,15 @@ static uint32_t
 server_pool_hash(struct server_pool *pool, uint8_t *key, uint32_t keylen)
 {
     ASSERT(array_n(&pool->server) != 0);
+    ASSERT(key != NULL);
 
     if (array_n(&pool->server) == 1) {
         return 0;
     }
 
-    ASSERT(key != NULL && keylen != 0);
+    if (keylen == 0) {
+        return 0;
+    }
 
     return pool->key_hash((char *)key, keylen);
 }
@@ -621,7 +649,7 @@ server_pool_idx(struct server_pool *pool, uint8_t *key, uint32_t keylen)
     uint32_t hash, idx;
 
     ASSERT(array_n(&pool->server) != 0);
-    ASSERT(key != NULL && keylen != 0);
+    ASSERT(key != NULL);
 
     /*
      * If hash_tag: is configured for this server pool, we use the part of

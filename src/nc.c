@@ -214,7 +214,7 @@ nc_show_usage(void)
         "  -d, --daemonize        : run as a daemon" CRLF
         "  -D, --describe-stats   : print stats description and exit");
     log_stderr(
-        "  -v, --verbosity=N      : set logging level (default: %d, min: %d, max: %d)" CRLF
+        "  -v, --verbose=N        : set logging level (default: %d, min: %d, max: %d)" CRLF
         "  -o, --output=S         : set logging file (default: %s)" CRLF
         "  -c, --conf-file=S      : set configuration file (default: %s)" CRLF
         "  -s, --stats-port=N     : set stats monitoring port (default: %d)" CRLF
@@ -306,9 +306,9 @@ static rstatus_t
 nc_get_options(int argc, char **argv, struct instance *nci)
 {
     int c, value;
-    size_t n;
+
     opterr = 0;
-    char *t ;
+
     for (;;) {
         c = getopt_long(argc, argv, short_options, long_options, NULL);
         if (c == -1) {
@@ -349,17 +349,11 @@ nc_get_options(int argc, char **argv, struct instance *nci)
             break;
 
         case 'o':
-            n = strlen(optarg);
-            t = malloc(n+1);
-            strncpy(t,optarg,n);
-            nci->log_filename = t;
+            nci->log_filename = optarg;
             break;
 
         case 'c':
-            n = strlen(optarg);
-            t = malloc(n+1);
-            strncpy(t,optarg,n);
-            nci->conf_filename = t;
+            nci->conf_filename = optarg;
             break;
 
         case 's':
@@ -388,17 +382,11 @@ nc_get_options(int argc, char **argv, struct instance *nci)
             break;
 
         case 'a':
-            n = strlen(optarg);
-            t = malloc(n+1);
-            strncpy(t,optarg,n);
-            nci->stats_addr = t;
+            nci->stats_addr = optarg;
             break;
 
         case 'p':
-            n = strlen(optarg);
-            t = malloc(n+1);
-            strncpy(t,optarg,n);
-            nci->pid_filename = t;
+            nci->pid_filename = optarg;
             break;
 
         case 'm':
@@ -547,14 +535,10 @@ nc_run(struct instance *nci)
 
     core_stop(ctx);
 }
-int ac;
-char **av;
 
 int
 main(int argc, char **argv)
 {
-    ac = argc;
-    av = argv;
     rstatus_t status;
     struct instance nci;
 

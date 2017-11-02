@@ -131,8 +131,6 @@ struct context {
     uint32_t           max_nfd;     /* max # files */
     uint32_t           max_ncconn;  /* max # client connections */
     uint32_t           max_nsconn;  /* max # server connections */
-    int                close;
-    int64_t            close_time; 
 };
 
 
@@ -149,7 +147,6 @@ struct instance {
     pid_t           pid;                         /* process id */
     char            *pid_filename;               /* pid filename */
     unsigned        pidfile:1;                   /* pid file created? */
-    int             p[2];
 };
 
 struct context *core_start(struct instance *nci);

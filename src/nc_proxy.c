@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include <sys/stat.h>
 #include <sys/un.h>
 
 #include <nc_core.h>
@@ -29,9 +30,9 @@ proxy_ref(struct conn *conn, void *owner)
     ASSERT(!conn->client && conn->proxy);
     ASSERT(conn->owner == NULL);
 
-    conn->family = pool->family;
-    conn->addrlen = pool->addrlen;
-    conn->addr = pool->addr;
+    conn->family = pool->info.family;
+    conn->addrlen = pool->info.addrlen;
+    conn->addr = (struct sockaddr *)&pool->info.addr;
 
     pool->p_conn = conn;
 
@@ -148,6 +149,16 @@ proxy_listen(struct context *ctx, struct conn *p)
         return NC_ERROR;
     }
 
+    if (p->family == AF_UNIX && pool->perm) {
+        struct sockaddr_un *un = (struct sockaddr_un *)p->addr;
+        status = chmod(un->sun_path, pool->perm);
+        if (status < 0) {
+            log_error("chmod on p %d on addr '%.*s' failed: %s", p->sd,
+                      pool->addrstr.len, pool->addrstr.data, strerror(errno));
+            return NC_ERROR;
+        }
+    }
+
     status = listen(p->sd, pool->backlog);
     if (status < 0) {
         log_error("listen on p %d on addr '%.*s' failed: %s", p->sd,
@@ -161,7 +172,7 @@ proxy_listen(struct context *ctx, struct conn *p)
                   pool->addrstr.len, pool->addrstr.data, strerror(errno));
         return NC_ERROR;
     }
-/*
+
     status = event_add_conn(ctx->evb, p);
     if (status < 0) {
         log_error("event add conn p %d on addr '%.*s' failed: %s",
@@ -177,33 +188,8 @@ proxy_listen(struct context *ctx, struct conn *p)
                   strerror(errno));
         return NC_ERROR;
     }
-*/
+
     return NC_OK;
-}
-
-rstatus_t add_proxy_conn(void *elem, void *data){
-    rstatus_t status;
-    struct server_pool *pool = elem;
-    struct conn *p;
-    p = pool->p_conn;
-
-    struct context *ctx = pool->ctx;
-    status = event_add_conn(ctx->evb, p);
-    if (status < 0) {
-        log_error("event add conn p %d on addr '%.*s' failed: %s",
-                  p->sd, pool->addrstr.len, pool->addrstr.data,
-                  strerror(errno));
-        return NC_ERROR;
-    }
-
-    status = event_del_out(ctx->evb, p);
-    if (status < 0) {
-        log_error("event del out p %d on addr '%.*s' failed: %s",
-                  p->sd, pool->addrstr.len, pool->addrstr.data,
-                  strerror(errno));
-        return NC_ERROR;
-    }
-
 }
 
 rstatus_t
@@ -265,17 +251,7 @@ proxy_each_deinit(void *elem, void *data)
 
     return NC_OK;
 }
-rstatus_t
-proxy_each_remove(void *elem, void *data)
-{
-    struct server_pool *pool = elem;
-    struct conn *p;
 
-    p = pool->p_conn;
-    event_del_conn(pool->ctx->evb,p);
-
-    return NC_OK;
-}
 void
 proxy_deinit(struct context *ctx)
 {
