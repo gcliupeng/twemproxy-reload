@@ -128,50 +128,67 @@ proxy_listen(struct context *ctx, struct conn *p)
 
     ASSERT(p->proxy);
 
-    p->sd = socket(p->family, SOCK_STREAM, 0);
-    if (p->sd < 0) {
-        log_error("socket failed: %s", strerror(errno));
-        return NC_ERROR;
-    }
+    //check pre_ctx
+    p->sd = -1;
+    if(ctx->pre_ctx){
 
-    status = proxy_reuse(p);
-    if (status < 0) {
-        log_error("reuse of addr '%.*s' for listening on p %d failed: %s",
-                  pool->addrstr.len, pool->addrstr.data, p->sd,
-                  strerror(errno));
-        return NC_ERROR;
+        struct array * pre_server_pool_array = &ctx->pre_ctx->pool;
+        int i =0;
+        for (i = 0; i < array_n(pre_server_pool_array); ++i){
+             struct server_pool *pre_pool = array_get(pre_server_pool_array,i);
+             if(string_compare(&pre_pool->addrstr,&pool->addrstr) ==0){
+                p->sd = dup(pre_pool->p_conn->sd);
+                break;
+             }
+         }
     }
-
-    status = bind(p->sd, p->addr, p->addrlen);
-    if (status < 0) {
-        log_error("bind on p %d to addr '%.*s' failed: %s", p->sd,
-                  pool->addrstr.len, pool->addrstr.data, strerror(errno));
-        return NC_ERROR;
-    }
-
-    if (p->family == AF_UNIX && pool->perm) {
-        struct sockaddr_un *un = (struct sockaddr_un *)p->addr;
-        status = chmod(un->sun_path, pool->perm);
-        if (status < 0) {
-            log_error("chmod on p %d on addr '%.*s' failed: %s", p->sd,
-                      pool->addrstr.len, pool->addrstr.data, strerror(errno));
+    if(p->sd <0){
+        p->sd = socket(p->family, SOCK_STREAM, 0);
+        if (p->sd < 0) {
+            log_error("socket failed: %s", strerror(errno));
             return NC_ERROR;
         }
-    }
 
-    status = listen(p->sd, pool->backlog);
-    if (status < 0) {
-        log_error("listen on p %d on addr '%.*s' failed: %s", p->sd,
-                  pool->addrstr.len, pool->addrstr.data, strerror(errno));
-        return NC_ERROR;
-    }
+        status = proxy_reuse(p);
+        if (status < 0) {
+            log_error("reuse of addr '%.*s' for listening on p %d failed: %s",
+                  pool->addrstr.len, pool->addrstr.data, p->sd,
+                  strerror(errno));
+            return NC_ERROR;
+        }
 
-    status = nc_set_nonblocking(p->sd);
-    if (status < 0) {
-        log_error("set nonblock on p %d on addr '%.*s' failed: %s", p->sd,
+        status = bind(p->sd, p->addr, p->addrlen);
+        if (status < 0) {
+            log_error("bind on p %d to addr '%.*s' failed: %s", p->sd,
                   pool->addrstr.len, pool->addrstr.data, strerror(errno));
-        return NC_ERROR;
-    }
+            return NC_ERROR;
+        }
+
+        if (p->family == AF_UNIX && pool->perm) {
+            struct sockaddr_un *un = (struct sockaddr_un *)p->addr;
+            status = chmod(un->sun_path, pool->perm);
+            if (status < 0) {
+                log_error("chmod on p %d on addr '%.*s' failed: %s", p->sd,
+                      pool->addrstr.len, pool->addrstr.data, strerror(errno));
+            return NC_ERROR;
+            }
+        }
+
+        status = listen(p->sd, pool->backlog);
+        if (status < 0) {
+            log_error("listen on p %d on addr '%.*s' failed: %s", p->sd,
+                  pool->addrstr.len, pool->addrstr.data, strerror(errno));
+            return NC_ERROR;
+        }
+
+        status = nc_set_nonblocking(p->sd);
+        if (status < 0) {
+            log_error("set nonblock on p %d on addr '%.*s' failed: %s", p->sd,
+                  pool->addrstr.len, pool->addrstr.data, strerror(errno));
+            return NC_ERROR;
+            }
+        }
+    
     /*
     status = event_add_conn(ctx->evb, p);
     if (status < 0) {
@@ -228,6 +245,7 @@ proxy_each_init(void *elem, void *data)
     if (p == NULL) {
         return NC_ENOMEM;
     }
+
 
     status = proxy_listen(pool->ctx, p);
     if (status != NC_OK) {

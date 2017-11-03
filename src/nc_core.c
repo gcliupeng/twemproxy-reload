@@ -38,9 +38,9 @@ static void reload(int signo){
         int status;
         waitpid(-1, &status, WNOHANG);
         if(WTERMSIG(status)){
-            log_error("signal receive %d\n",WTERMSIG(status));
+            log_error("%d signal receive %d\n",getpid(), WTERMSIG(status));
         }else{
-            log_error("code receive %d\n",WEXITSTATUS(status) );
+            log_error("%d code receive %d\n",getpid(), WEXITSTATUS(status) );
         }
     }
 }
@@ -70,11 +70,19 @@ static rstatus_t master_worker_init(struct instance *nci){
         if(pipe(nci->p)==-1){
             return NC_ERROR;
         }
+        if(nci->pre_ctx){
+            nci->ctx = conf_cycle(nci);
+        }
 
         int child_pid = fork();
         if(child_pid < 0){
             return NC_ERROR;
         }else if(child_pid > 0){
+            if(nci->pre_ctx){
+                //need free pre_ctx memory
+                core_ctx_destroy(nci->pre_ctx);
+                nci->pre_ctx = NULL;
+            }
             //set title
             size_t max = 0;
             int i;
@@ -95,6 +103,8 @@ static rstatus_t master_worker_init(struct instance *nci){
                 sigsuspend(&set);
                 if(reload_receive){
                     reload_receive = 0;
+                    nci->pre_ctx = nci->ctx;
+                    nci->ctx = NULL;
                     break;
                 }
             }
@@ -120,9 +130,7 @@ static rstatus_t master_worker_init(struct instance *nci){
     return NC_OK;
 }
 
-static struct context *
-core_ctx_create(struct instance *nci)
-{
+struct context * conf_cycle(struct instance *nci){
     rstatus_t status;
     struct context *ctx;
 
@@ -140,6 +148,8 @@ core_ctx_create(struct instance *nci)
     ctx->max_nfd = 0;
     ctx->max_ncconn = 0;
     ctx->max_nsconn = 0;
+    ctx->close = ctx->close_time = 0;
+    ctx->pre_ctx = nci->pre_ctx;
 
     /* parse and create configuration */
     ctx->cf = conf_create(nci->conf_filename);
@@ -147,7 +157,6 @@ core_ctx_create(struct instance *nci)
         nc_free(ctx);
         return NULL;
     }
-
     /* initialize server pool from configuration */
     status = server_pool_init(&ctx->pool, &ctx->cf->pool, ctx);
     if (status != NC_OK) {
@@ -168,17 +177,6 @@ core_ctx_create(struct instance *nci)
         return NULL;
     }
 
-    /* create stats per server pool */
-    ctx->stats = stats_create(nci->stats_port, nci->stats_addr, nci->stats_interval,
-                              nci->hostname, &ctx->pool);
-    if (ctx->stats == NULL) {
-        server_pool_deinit(&ctx->pool);
-        conf_destroy(ctx->cf);
-        nc_free(ctx);
-        return NULL;
-    }
-
-
     /* initialize proxy per server pool */
     status = proxy_init(ctx);
     if (status != NC_OK) {
@@ -190,8 +188,33 @@ core_ctx_create(struct instance *nci)
         nc_free(ctx);
         return NULL;
     }
+    return ctx;
+}
+
+static struct context *
+core_ctx_create(struct instance *nci)
+{
+    rstatus_t status;
+    struct context *ctx = conf_cycle(nci);
+    if(!ctx){
+        return NULL;
+    }
+    nci->ctx = ctx;
 
     master_worker_init(nci);
+    
+
+    ctx = nci->ctx;
+
+    /* create stats per server pool */
+    ctx->stats = stats_create(nci->stats_port, nci->stats_addr, nci->stats_interval,
+                              nci->hostname, &ctx->pool);
+    if (ctx->stats == NULL) {
+        server_pool_deinit(&ctx->pool);
+        conf_destroy(ctx->cf);
+        nc_free(ctx);
+        return NULL;
+    }
 
     /* initialize event handling for client, proxy and server */
     ctx->evb = event_base_create(EVENT_SIZE, &core_core);
@@ -202,8 +225,6 @@ core_ctx_create(struct instance *nci)
         nc_free(ctx);
         return NULL;
     }
-
-    
 
     /* preconnect? servers in server pool */
     status = server_pool_preconnect(ctx);
@@ -235,8 +256,7 @@ core_ctx_create(struct instance *nci)
     return ctx;
 }
 
-static void
-core_ctx_destroy(struct context *ctx)
+void core_ctx_destroy(struct context *ctx)
 {
     log_debug(LOG_VVERB, "destroy ctx %p id %"PRIu32"", ctx, ctx->id);
     proxy_deinit(ctx);

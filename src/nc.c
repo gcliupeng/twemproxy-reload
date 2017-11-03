@@ -300,6 +300,7 @@ nc_set_default_options(struct instance *nci)
     nci->pid = (pid_t)-1;
     nci->pid_filename = NULL;
     nci->pidfile = 0;
+    nci->pre_ctx = NULL;
 }
 
 static rstatus_t
@@ -536,7 +537,6 @@ nc_run(struct instance *nci)
     if (ctx == NULL) {
         return;
     }
-
     /* run rabbit run */
     for (;;) {
         status = core_loop(ctx);

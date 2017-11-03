@@ -153,6 +153,7 @@ conf_server_each_transform(void *elem, void *data)
     s->pname = cs->pname;
     s->name = cs->name;
     s->addrstr = cs->addrstr;
+
     s->port = (uint16_t)cs->port;
     s->weight = (uint32_t)cs->weight;
 
@@ -510,7 +511,6 @@ conf_handler(struct conf *cf, void *data)
         if (string_compare(key, &cmd->name) != 0) {
             continue;
         }
-
         rv = cmd->set(cf, cmd, data);
         if (rv != CONF_OK) {
             log_error("conf: directive \"%.*s\" %s", key->len, key->data, rv);

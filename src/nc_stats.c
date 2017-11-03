@@ -834,6 +834,12 @@ stats_listen(struct stats *st)
         return NC_ERROR;
     }
 
+    status = nc_set_reuseport(st->sd);
+    if (status < 0) {
+        log_error("set reuseaddr on m %d failed: %s", st->sd, strerror(errno));
+        return NC_ERROR;
+    }
+
     status = bind(st->sd, (struct sockaddr *)&si.addr, si.addrlen);
     if (status < 0) {
         log_error("bind on m %d to addr '%.*s:%u' failed: %s", st->sd,
@@ -970,12 +976,14 @@ error:
 void
 stats_destroy(struct stats *st)
 {
-    stats_stop_aggregator(st);
-    stats_pool_unmap(&st->sum);
-    stats_pool_unmap(&st->shadow);
-    stats_pool_unmap(&st->current);
-    stats_destroy_buf(st);
-    nc_free(st);
+    if(st){
+        stats_stop_aggregator(st);
+        stats_pool_unmap(&st->sum);
+        stats_pool_unmap(&st->shadow);
+        stats_pool_unmap(&st->current);
+        stats_destroy_buf(st);
+        nc_free(st);
+    }
 }
 
 void

@@ -133,11 +133,13 @@ struct context {
     uint32_t           max_nsconn;  /* max # server connections */
     int                close;
     int64_t            close_time; 
+    struct context     *pre_ctx;
 };
 
 
 struct instance {
     struct context  *ctx;                        /* active context */
+    struct context  *pre_ctx;                    /* pre context */
     int             log_level;                   /* log level */
     char            *log_filename;               /* log filename */
     char            *conf_filename;              /* configuration filename */
@@ -156,5 +158,6 @@ struct context *core_start(struct instance *nci);
 void core_stop(struct context *ctx);
 rstatus_t core_core(void *arg, uint32_t events);
 rstatus_t core_loop(struct context *ctx);
-
+void core_ctx_destroy(struct context *ctx);
+struct context * conf_cycle(struct instance *nci);
 #endif
