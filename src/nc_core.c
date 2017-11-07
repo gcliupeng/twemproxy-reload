@@ -87,7 +87,7 @@ static rstatus_t master_worker_init(struct instance *nci){
             size_t max = 0;
             int i;
             for (i = 0; i <ac ; ++i){
-                max+= strlen(av[i])+1;
+                    max+= strlen(av[i])+1;
             }
             i=nc_snprintf((char*)av[0],max,"twemproxy master");
             nc_snprintf((char*)av[0]+i,max-i,pad);
@@ -115,6 +115,12 @@ static rstatus_t master_worker_init(struct instance *nci){
             }
         }else{
             //child
+
+            if(nci->pre_ctx){
+                //need free pre_ctx memory
+                core_ctx_destroy(nci->pre_ctx);
+                nci->pre_ctx = NULL;
+            }
             size_t max = 0;
             int i;
             for (i = 0; i <ac ; ++i){
